@@ -1,0 +1,1 @@
+https://impgub3pq0.execute-api.us-west-2.amazonaws.com/test/getsigninresult

@@ -1,0 +1,1 @@
+https://tessercon.auth.us-west-2.amazoncognito.com/login?client_id=7s918121ijf133hmo8m1ug2d3t&response_type=code&scope=aws.cognito.signin.user.admin+email+gamelift.tsgame.api/access+openid+phone+profile&redirect_uri=https://impgub3pq0.execute-api.us-west-2.amazonaws.com/test/getsigninresult

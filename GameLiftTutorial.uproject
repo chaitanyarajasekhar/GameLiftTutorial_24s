@@ -1,0 +1,35 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "{B5A1F6F5-43F6-C30B-F13C-C68FC4426E96}",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "GameLiftTutorial",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"UMG"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "GameLiftServerSDK",
+			"Enabled": true
+		},
+        {
+            "Name": "WebBrowserWidget",
+            "Enabled": true
+        },
+        {
+            "Name": "OculusVR",
+            "Enabled": false
+        },
+        {
+            "Name": "SteamVR",
+            "Enabled":  false
+        }
+	]
+}
