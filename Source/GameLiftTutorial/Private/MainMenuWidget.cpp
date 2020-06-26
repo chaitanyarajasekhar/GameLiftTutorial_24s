@@ -49,25 +49,57 @@ void UMainMenuWidget::NativeConstruct()
 
 	GetWorld()->GetTimerManager().SetTimer(SetAveragePlayerLatencyHandle, this, &UMainMenuWidget::SetAveragePlayerLatency, 1.0f, true, 1.0f);
 
-	IWebBrowserSingleton* WebBrowserSingleton = IWebBrowserModule::Get().GetSingleton();
-
-	if (WebBrowserSingleton != nullptr)
+	FString AccessToken;
+	UGameInstance* GameInstance = GetGameInstance();
+	if (GameInstance != nullptr)
 	{
-		TOptional<FString> DefaultContext;
-		TSharedPtr<IWebBrowserCookieManager> CookieManager = WebBrowserSingleton->GetCookieManager(DefaultContext);
-
-		if (CookieManager != nullptr)
+		UGameLiftTutorialGameInstance* GameLiftTutorialGameInstance = Cast<UGameLiftTutorialGameInstance>(GameInstance);
+		if (GameLiftTutorialGameInstance != nullptr)
 		{
-			CookieManager->DeleteCookies();
+			AccessToken = GameLiftTutorialGameInstance->AccessToken;
 		}
-
 	}
 
-	WebBrowser->LoadURL(LoginUrl);
+	if (AccessToken.Len() > 0)
+	{
+		TSharedRef<IHttpRequest> GetPlayerDataRequest = HttpModule->CreateRequest();
+		GetPlayerDataRequest->OnProcessRequestComplete().BindUObject(this, &UMainMenuWidget::OnGetPlayerDataResponseReceived);
+		GetPlayerDataRequest->SetURL(ApiUrl + "/getplayerdata");
+		GetPlayerDataRequest->SetVerb("GET");
+		GetPlayerDataRequest->SetHeader("Content-Type", "application/json");
+		GetPlayerDataRequest->SetHeader("Authorization", AccessToken);
+		GetPlayerDataRequest->ProcessRequest();
+	}
+	else
+	{
+		IWebBrowserSingleton* WebBrowserSingleton = IWebBrowserModule::Get().GetSingleton();
 
-	FScriptDelegate LoginDelegate;
-	LoginDelegate.BindUFunction(this, "HandleLoginUrlChange");
-	WebBrowser->OnUrlChanged.Add(LoginDelegate);
+		if (WebBrowserSingleton != nullptr)
+		{
+			TOptional<FString> DefaultContext;
+			TSharedPtr<IWebBrowserCookieManager> CookieManager = WebBrowserSingleton->GetCookieManager(DefaultContext);
+
+			if (CookieManager != nullptr)
+			{
+				CookieManager->DeleteCookies();
+			}
+
+		}
+
+		WebBrowser->LoadURL(LoginUrl);
+
+		FScriptDelegate LoginDelegate;
+		LoginDelegate.BindUFunction(this, "HandleLoginUrlChange");
+		WebBrowser->OnUrlChanged.Add(LoginDelegate);
+	}	
+}
+
+void UMainMenuWidget::NativeDestruct()
+{
+	GetWorld()->GetTimerManager().ClearTimer(PollMatchmakingHandle);
+	GetWorld()->GetTimerManager().ClearTimer(SetAveragePlayerLatencyHandle);
+
+	Super::NativeDestruct();
 }
 
 void UMainMenuWidget::HandleLoginUrlChange()
@@ -133,9 +165,7 @@ void UMainMenuWidget::OnExchangeCodeForTokensResponseReceived(FHttpRequestPtr Re
 						FString RefreshToken = JsonObject->GetStringField("refresh_token");
 
 						GameLiftTutorialGameInstance->SetCognitoTokens(AccessToken, IdToken, RefreshToken);
-
 						
-
 						TSharedRef<IHttpRequest> GetPlayerDataRequest = HttpModule->CreateRequest();
 						GetPlayerDataRequest->OnProcessRequestComplete().BindUObject(this, &UMainMenuWidget::OnGetPlayerDataResponseReceived);
 						GetPlayerDataRequest->SetURL(ApiUrl + "/getplayerdata");
@@ -407,54 +437,60 @@ void UMainMenuWidget::OnPollMatchmakingResponseReceived(FHttpRequestPtr Request,
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
 		if (FJsonSerializer::Deserialize(Reader, JsonObject))
 		{
-			TSharedPtr<FJsonObject> Ticket = JsonObject->GetObjectField("ticket");
-			FString TicketType = Ticket->GetObjectField("Type")->GetStringField("S");
-
-			if (TicketType.Len() > 0)
+			if (JsonObject->HasField("ticket"))
 			{
-				GetWorld()->GetTimerManager().ClearTimer(PollMatchmakingHandle);
-				SearchingForGame = false;
+				TSharedPtr<FJsonObject> Ticket = JsonObject->GetObjectField("ticket");
+				FString TicketType = Ticket->GetObjectField("Type")->GetStringField("S");
 
-				UGameInstance* GameInstance = GetGameInstance();
-				if (GameInstance != nullptr)
+				if (TicketType.Len() > 0)
 				{
-					UGameLiftTutorialGameInstance* GameLiftTutorialGameInstance = Cast<UGameLiftTutorialGameInstance>(GameInstance);
-					if (GameLiftTutorialGameInstance != nullptr)
+					GetWorld()->GetTimerManager().ClearTimer(PollMatchmakingHandle);
+					SearchingForGame = false;
+
+					UGameInstance* GameInstance = GetGameInstance();
+					if (GameInstance != nullptr)
 					{
-						GameLiftTutorialGameInstance->MatchmakingTicketId = "";
+						UGameLiftTutorialGameInstance* GameLiftTutorialGameInstance = Cast<UGameLiftTutorialGameInstance>(GameInstance);
+						if (GameLiftTutorialGameInstance != nullptr)
+						{
+							GameLiftTutorialGameInstance->MatchmakingTicketId = "";
+
+						}
+					}
+
+					if (TicketType.Equals("MatchmakingSucceeded"))
+					{
+						UE_LOG(LogTemp, Warning, TEXT("matchmaking succeeded --------------------------"));
+
+
+						MatchmakingButton->SetIsEnabled(false);
+						MatchmakingEventTextBlock->SetText(FText::FromString("Successfully found a match. Now connecting to the server ..."));
+
+						TSharedPtr<FJsonObject> GameSessionInfo = Ticket->GetObjectField("GameSessionInfo")->GetObjectField("M");
+						FString IpAddress = GameSessionInfo->GetObjectField("IpAddress")->GetStringField("S");
+						FString Port = GameSessionInfo->GetObjectField("Port")->GetStringField("N");
+
+						TArray<TSharedPtr<FJsonValue>> Players = Ticket->GetObjectField("Players")->GetArrayField("L");
+						TSharedPtr<FJsonObject> Player = Players[0]->AsObject()->GetObjectField("M");
+						FString PlayerSessionId = Player->GetObjectField("PlayerSessionId")->GetStringField("S");
+						FString PlayerId = Player->GetObjectField("PlayerId")->GetStringField("S");
+
+						FString LevelName = IpAddress + ":" + Port;
+						const FString& Options = "?PlayerSessionId=" + PlayerSessionId + "?PlayerId=" + PlayerId;
+
+						UE_LOG(LogTemp, Warning, TEXT("options: %s"), *Options);
+
+						UGameplayStatics::OpenLevel(GetWorld(), FName(*LevelName), false, Options);
+						// this fails can assign on travel failed delegae function to handle that option 
 
 					}
-				}
-
-				if (TicketType.Equals("MatchmakingSucceeded"))
-				{
-					MatchmakingButton->SetIsEnabled(false);
-					MatchmakingEventTextBlock->SetText(FText::FromString("Successfully found a match. Now connecting to the server ..."));
-
-					TSharedPtr<FJsonObject> GameSessionInfo = Ticket->GetObjectField("GameSessionInfo")->GetObjectField("M");
-					FString IpAddress = GameSessionInfo->GetObjectField("IpAddress")->GetStringField("S");
-					FString Port = GameSessionInfo->GetObjectField("Port")->GetStringField("N");
-
-					TArray<TSharedPtr<FJsonValue>> Players = Ticket->GetObjectField("Players")->GetArrayField("L");
-					TSharedPtr<FJsonObject> Player = Players[0]->AsObject()->GetObjectField("M");
-					FString PlayerSessionId = Player->GetObjectField("PlayerSessionId")->GetStringField("S");
-					FString PlayerId = Player->GetObjectField("PlayerId")->GetStringField("S");
-
-					FString LevelName = IpAddress + ":" + Port;
-					const FString& Options = "?PlayerSessionId=" + PlayerSessionId + "?PlayerId=" + PlayerId;
-
-					UE_LOG(LogTemp, Warning, TEXT("options: %s"), *Options);
-
-					UGameplayStatics::OpenLevel(GetWorld(), FName(*LevelName), false, Options);
-					// this fails can assign on travel failed delegae function to handle that option 
-				
-				}
-				else
-				{
-					// all other matchmaking types
-					UTextBlock* ButtonTextBlock = (UTextBlock*)MatchmakingButton->GetChildAt(0);
-					ButtonTextBlock->SetText(FText::FromString("Join Game"));
-					MatchmakingEventTextBlock->SetText(FText::FromString(TicketType + ". Please try again"));
+					else
+					{
+						// all other matchmaking types
+						UTextBlock* ButtonTextBlock = (UTextBlock*)MatchmakingButton->GetChildAt(0);
+						ButtonTextBlock->SetText(FText::FromString("Join Game"));
+						MatchmakingEventTextBlock->SetText(FText::FromString(TicketType + ". Please try again"));
+					}
 				}
 			}
 		}
